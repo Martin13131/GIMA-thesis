@@ -18,7 +18,7 @@ def formGrid(df, gridPoints=10):
     gridY = np.linspace(yMin, yMax, gridPoints)
     return gridX, gridY
 
-def findClosest(val, gridVals):
+def findClosest(val, gridVals): # Use scipy spatial.euclidean?
     idx = np.argmin(abs(val-gridVals))
     return gridVals[idx]
     
@@ -38,18 +38,25 @@ def gridMask(df, gridPoints=10):
 
 df = pd.read_csv("joinedTracks.csv")
 
-track = df[df["track"]==301757]
+track = df.head(500)
 df = track.copy()
-df = gridMask(df, gridPoints=3)
+df = gridMask(df, gridPoints=10)
 
+gridX, gridY = formGrid(df, gridPoints=10)
+xplot, yplot = [], []
+for x in gridX:
+    for y in gridY:
+        xplot.append(x)
+        yplot.append(y)
 
+plt.scatter(xplot, yplot, c='purple', marker=',')
 
 plt.subplot(2,1,1)
 plt.title("Original data")
-plt.scatter(track["X"], track["Y"])
+plt.scatter(track["X"], track["Y"], c='b', marker=',')
 plt.subplot(2,1,2)
 plt.title("applied grid masking")
-plt.scatter(df["X"], df["Y"])
+plt.scatter(df["X"], df["Y"], c='red', marker=',')
 track==df
 
 

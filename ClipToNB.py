@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 from shapely import geometry
 import geopandas as gpd
-
+import networkx as nx
 
 Path = r"C:\Users\mljmo\OneDrive\GIMA\Thesis\Data"
 os.chdir(Path)
@@ -36,3 +36,5 @@ gdf.plot()
 
 base = NBrabant.plot(color='white', edgecolor="black")
 gdf.plot(ax=base)
+
+#gdf.to_csv("clippedTracks.csv")
