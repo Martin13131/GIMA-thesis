@@ -21,12 +21,13 @@ Roads = Roads[Roads["provincie"]=="Noord-Brabant"]
 Roads.crs = {'init':'epsg:28992'}
 Roads = Roads.to_crs({'init': 'epsg:4326'})
 
-
+Nodes = gpd.read_file(r"FietsersBondnetwerk_NL/nodes.shp")
+Nodes = Nodes[Nodes["provincie"]=="Noord-Brabant"]
+Nodes.crs = {'init':'epsg:28992'}
+Nodes = Nodes.to_crs({'init': 'epsg:4326'})
 
 NBrabant = gpd.read_file("NBrabant.shp")
 NBrabant["Dissolve"] = True
 NBrabant = NBrabant.dissolve(by="Dissolve").buffer(500).to_crs({'init': 'epsg:4326'})
 
 
-base = NBrabant.plot(color='white', edgecolor="black")
-Roads.plot(ax=base, color='black', alpha=0.3)

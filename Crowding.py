@@ -17,13 +17,13 @@ def getRoadSegments(df, Roads, buffersize=0.02):
     Buffer = shapely.ops.cascaded_union(df['geometry'].apply(lambda x: x.buffer(buffersize)))
     return Roads[Roads["geometry"].intersects(Buffer)]
 
-def crowding(df, Roads, buffersize=0.02):
+def crowding(df, Roads, buffersize=0.02, pointsToAdd=1000):
     FakePoints = []
     for road in getRoadSegments(df, Roads, buffersize)['geometry']:
         for point in list(road.coords):
             FakePoints.append(geometry.Point(point))
             
-    for point in random.sample(FakePoints,500):
+    for point in random.sample(FakePoints,pointsToAdd):
         df = df.append({'geometry':point}, ignore_index=True)
     return df
     
@@ -44,5 +44,9 @@ Roads = Roads.to_crs({'init': 'epsg:4326'})
 
 track = df.head(500)
 df = track.copy()
-df = crowding(df, Roads)
+df = crowding(df, Roads,  pointsToAdd=2000)
+
+
+base = NBrabant.plot(color='white', edgecolor="black")
+Roads.plot(ax=base, color='black', alpha=0.3)
 df.plot(ax=base, c='red', marker=',')

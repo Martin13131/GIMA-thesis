@@ -30,11 +30,15 @@ for track, trackdf in df.groupby("track"):
         continue
     Data.append([track, points,lines])
 
-gdf = gpd.GeoDataFrame(Data, columns=["track","points","geometry"])
-gdf.plot()
 
 
-base = NBrabant.plot(color='white', edgecolor="black")
-gdf.plot(ax=base)
+
+#
+#gdf = gpd.GeoDataFrame(Data, columns=["track","points","geometry"])
+#gdf.plot()
+#
+#
+#base = NBrabant.plot(color='white', edgecolor="black")
+#gdf.plot(ax=base)
 
 #gdf.to_csv("clippedTracks.csv")
