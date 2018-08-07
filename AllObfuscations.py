@@ -31,8 +31,8 @@ def multiplot(Input):
         print("Error plotting, unexpected input type")
         
 ######################## Grid masking
-def gridMask(track, gridDist=50):
-    def formGrid(track, gridDist=50):
+def gridMask(track, gridDist=250):
+    def formGrid(track, gridDist=250):
         xMin, yMin, xMax, yMax = track.bounds
         gridX = np.arange(xMin, xMax, gridDist)
         gridY = np.arange(yMin, yMax, gridDist)
@@ -68,11 +68,6 @@ def crowding(track, Roads, buffersize=500, pointsToAdd=1000):
         Buffer = track.buffer(buffersize)                                       #shapely.ops.cascaded_union(track['geometry'].apply(lambda x: x.buffer(buffersize)))
         return Roads[Roads["geometry"].intersects(Buffer)]
 
-
-#    FakePoints = []
-#    for road in getRoadSegments(track, Roads, buffersize)['geometry']:
-#        for point in list(road.coords):
-#            FakePoints.append(geometry.Point(point))
     FakePoints = [point for road in getRoadSegments(track, Roads, buffersize)['geometry'] for point in list(road.coords)]
     try:
         FakePointsToAdd = geometry.MultiPoint(random.sample(FakePoints, pointsToAdd))
@@ -84,7 +79,7 @@ def crowding(track, Roads, buffersize=500, pointsToAdd=1000):
 
 ################### actual script
 # Loading data
-Path = r"C:\Users\mljmo\OneDrive\GIMA\Thesis\Data"
+Path = r"C:\Users\Maarten\OneDrive\GIMA\Thesis\Data"
 os.chdir(Path)
 
 
@@ -100,13 +95,13 @@ ts = time.time()
 gdf['gridMasked'] = gdf['geometry'].apply(gridMask)
 print("Grid masking took ", time.time()-ts, " seconds")
 gmtime = time.time()-ts
-
+gdf.drop('geometry',axis=1).set_geometry('gridMasked').to_file(r"Obfuscated/GridMasking.shp")
 
 ts = time.time()
 gdf['randPert'] = gdf['geometry'].apply(perturbationMask)
 print("Random Perturbation took ", time.time()-ts, " seconds")
 rptime = time.time()-ts
-
+gdf.drop('geometry',axis=1).set_geometry('randPert').to_file(r"Obfuscated/RandomPerturbation.shp")
 
 ts=time.time()
 start = 10900
@@ -128,6 +123,36 @@ newGdf.index = newGdf.track
 newGdf['crowded'] = newGdf['geometry'].apply(lambda track: crowding(track, Roads, buffersize=500, pointsToAdd=1000))
 newGdf.drop('geometry',axis=1).set_geometry('crowded').to_file(r"CrowdingChunks/"+str(start)+".shp")
 
-ToRead = [r"CrowdingChunks/"+str(start)+".shp" for start in range(0,37000,100)]
 
+ToRead = [r"CrowdingChunks/"+str(start)+".shp" for start in range(0,37000,100)]
 gdfs = pd.concat([gpd.read_file(x) for x in ToRead])
+gdfs.to_file(r"Obfuscated/crowdingObfuscation.shp")
+
+
+
+#### change to np arrays
+def to_np_array(multipoint):
+    return np.array([point.coords for point in multipoint.geoms]).reshape(-1,2)
+
+original = gpd.read_file(r"Preprocessed/tracks.shp")
+original.crs ={"init": 'epsg:4326'}
+original.to_crs(epsg=28992, inplace=True)
+gm = gpd.read_file(r"Obfuscated/GridMasking.shp")
+rp = gpd.read_file(r"Obfuscated/RandomPerturbation.shp")
+cr = gpd.read_file(r"Obfuscated/crowdingObfuscation.shp")
+
+gm.columns = ['track','gridmasking']
+rp.columns=['track', 'randpert']
+cr.columns = ['track','crowding']
+gdf = original.merge(gm).merge(rp).merge(cr)
+del gm, rp, cr, original
+gdf.index = gdf.track
+gdf.drop("track",axis=1, inplace=True)
+
+gdf['np_track'] = gdf['geometry'].apply(to_np_array)
+gdf['np_rp'] = gdf['randpert'].apply(to_np_array)
+gdf['np_gm'] = gdf['gridmasking'].apply(to_np_array)
+gdf['np_cr'] = gdf['crowding'].apply(to_np_array)
+ToSave = gdf[['np_track','np_gm','np_rp', 'np_cr']]
+ToSave.to_pickle("Obfuscations.pickle")
+

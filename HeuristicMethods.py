@@ -12,16 +12,11 @@ import pandas as pd
 #from shapely import geometry
 import scipy
 from scipy import spatial
-
+from scipy import signal
 ### scipy.stats.gaussian_kde
 
 path = r"C:\Users\mljmo\OneDrive\GIMA\Thesis\Data"
 os.chdir(path)
-
-def WindowAttack(track, window=3):
-    signal.convolve2d(np.array(track), np.ones((window,window)))
-    
-    
     
 #####################################
 def Smoothing(track, window=3):
@@ -32,10 +27,34 @@ def Smoothing(track, window=3):
     track[:,1] = movingaverage(track[:,1],3)
     return track
 
+def deGridMask(track):
+    track = np.array(track)
+    def ReconstructGrid(track):
+        yUnique = np.unique(track[:,1])
+        yDist = (yUnique[1:-1] - yUnique[:-2]).min()
+        xUnique = np.unique(track[:,0])
+        xDist = (xUnique[1:-1] - xUnique[:-2]).min()
+        xmin, xmax = track[:,0].min(), track[:,0].max()
+        ymin, ymax = track[:,1].min(), track[:,1].max()
+        xgrid = np.arange(xmin, xmax, xDist)
+        ygrid = np.arange(ymin, ymax, yDist)
+        return xgrid, ygrid
+    
+    def findPossibilitySpace(xgrid, ygrid):
+        return spatial.Voronoi([(x,y) for x in xgrid for y in ygrid])
+
+    def AreaEstimation(track, voronoiGrid):
+        
+        
+        
+        
+    xgrid, ygrid = ReconstructGrid(track)
+    voronoiGrid = findPossibilitySpace(xgrid, ygrid)
+    return voronoiGrid
 ##################################### Preprocessing
 gdf = pd.read_pickle("Obfuscations.pickle")
 
-predictor = gdf['np_rp']
+predictor = gdf['np_gm']
 response = gdf['np_track']
 
 Translation_table = np.zeros((len(gdf),2))
