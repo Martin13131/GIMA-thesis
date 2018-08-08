@@ -20,37 +20,70 @@ os.chdir(path)
     
 #####################################
 def Smoothing(track, window=3):
-    def movingaverage(values, window):
-        return np.convolve(values, np.repeat(1.0, window)/window, 'same')
-    track = np.array(track)
-    track[:,0] = movingaverage(track[:,0],3)
-    track[:,1] = movingaverage(track[:,1],3)
-    return track
+    try:
+        def movingaverage(values, window):
+            return np.convolve(values, np.repeat(1.0, window)/window, 'same')
+        track = np.array(track)
+        track[:,0] = movingaverage(track[:,0],3)
+        track[:,1] = movingaverage(track[:,1],3)
+        return track
+    except ValueError: # If track is shorter than 3 points
+        print("Track too short")
+        return track
 
 def deGridMask(track):
     track = np.array(track)
+    
     def ReconstructGrid(track):
         yUnique = np.unique(track[:,1])
         yDist = (yUnique[1:-1] - yUnique[:-2]).min()
         xUnique = np.unique(track[:,0])
         xDist = (xUnique[1:-1] - xUnique[:-2]).min()
-        xmin, xmax = track[:,0].min(), track[:,0].max()
-        ymin, ymax = track[:,1].min(), track[:,1].max()
-        xgrid = np.arange(xmin, xmax, xDist)
-        ygrid = np.arange(ymin, ymax, yDist)
+        
+        xmin, xmax = track[:,0].min()-xDist, track[:,0].max()+xDist+1
+        ymin, ymax = track[:,1].min()-yDist, track[:,1].max()+yDist+1
+        xgrid = np.arange(xmin, xmax, xDist) # +1 to ensure inclusion of xmax in grid
+        ygrid = np.arange(ymin, ymax, yDist) # +1 to ensure inclusion of ymax in grid
         return xgrid, ygrid
     
-    def findPossibilitySpace(xgrid, ygrid):
-        return spatial.Voronoi([(x,y) for x in xgrid for y in ygrid])
+    def CompletePolygon(area, xgrid, ygrid):
+        try:
+            xDist = xgrid[1] - xgrid[0]
+            yDist = ygrid[1] - ygrid[0]
+            p1, p2 = area
+            x1, y1 = p1
+            x2, y2 = p2
+            if x1 == x2 and x1 < xgrid[1]: #
+                p3, p4 = np.array([x1-xDist, y1]), np.array([x2-xDist, y2])
+            elif x1 == x2 and x1 > xgrid[-2]:
+                p3, p4 = np.array([x1+xDist, y1]), np.array([x2+xDist, y2])
+            elif y1 == y2 and y1 < ygrid[1]:
+                p3, p4 = np.array([x1, y1-yDist]), np.array([x2, y2-yDist])
+            elif y1 == y2 and y1 > ygrid[-2]:
+                p3, p4 = np.array([x1, y1+yDist]), np.array([x2, y2+yDist])
+            return [p1, p2, p3, p4]
+        except Exception as e:
+            print(area, e)
+            
+    def findPossibilitySpace(track, xgrid, ygrid):
+        def TraverseVoronoi(point, grid, vor): 
+            gridId = np.argmin(abs(point-grid))
+            regionId = vor.point_region[gridId]
+            verticesId = vor.regions[regionId]
+            area = [vor.vertices[vertexId] for vertexId in verticesId if vertexId != -1]
+            if len(area) != 4:
+                area = CompletePolygon(area, xgrid, ygrid)
+            return area
+        
+        grid = [(x,y) for x in xgrid for y in ygrid]
+        vor = spatial.Voronoi(grid)
+        areas = [TraverseVoronoi(point, grid, vor) for point in track]
+        return areas
 
-    def AreaEstimation(track, voronoiGrid):
-        
-        
-        
-        
     xgrid, ygrid = ReconstructGrid(track)
-    voronoiGrid = findPossibilitySpace(xgrid, ygrid)
-    return voronoiGrid
+    areas = findPossibilitySpace(track, xgrid, ygrid)
+    return areas
+
 ##################################### Preprocessing
 gdf = pd.read_pickle("Obfuscations.pickle")
 
@@ -59,7 +92,7 @@ response = gdf['np_track']
 
 Translation_table = np.zeros((len(gdf),2))
 predictor_data = []
-
+errorTracks = []
 for i, predictor_val in enumerate(predictor):
     xmean = np.mean(predictor_val[:,0])
     ymean = np.mean(predictor_val[:,1])    
@@ -67,16 +100,21 @@ for i, predictor_val in enumerate(predictor):
     track = []
     for t, point in enumerate(predictor_val):
         track.append([point[0] - xmean, point[1] - ymean])
-    predictor_data.append(track)
+        predictor_data.append(track)
 
 response_data = [value.tolist() for value in response.values.tolist()]
+SmoothResults = [Smoothing(track) for track in predictor_data] # 80 tracks too short
+recall = [Recall(response_data[i], SmoothResults[i]+Translation_table[i]) for i in range(len(SmoothResults))]
+precision = [Precision(response_data[i], SmoothResults[i]+Translation_table[i]) for i in range(len(SmoothResults))]
 
 
-############################## Testing
-x = predictor_data[0]
-x = Smoothing(x) + Translation_table[0]
-plt.scatter(x[:,0], x[:,1], c='r')
-y = np.array(response_data[0])
-plt.scatter(y[:,0], y[:,1], c='b')
-z = np.array(predictor_data[0]) + Translation_table[0]
-plt.scatter(z[:,0], z[:,1], c='y') 
+DeGridMaskResults = [deGridMask(track) for track in predictor_data]
+
+############################### Testing
+#x = predictor_data[0]
+#x = Smoothing(x) + Translation_table[0]
+#plt.scatter(x[:,0], x[:,1], c='r')
+#y = np.array(response_data[0])
+#plt.scatter(y[:,0], y[:,1], c='b')
+#z = np.array(predictor_data[0]) + Translation_table[0]
+#plt.scatter(z[:,0], z[:,1], c='y') 

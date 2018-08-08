@@ -15,13 +15,13 @@ import tensorflow as tf
 from keras.preprocessing.sequence import pad_sequences
 from keras.layers import GRU, Input, Dense, TimeDistributed, Embedding, Bidirectional, RepeatVector, Flatten
 from keras.models import Model, Sequential
-from keras.layers import Activation, LSTM, LocallyConnected1D, Conv1D, ZeroPadding1D
+from keras.layers import Activation, LSTM, LocallyConnected1D, Conv1D, ZeroPadding1D, Masking
 from keras.optimizers import Adam, SGD, rmsprop
-from sklearn.preprocessing import MinMaxScaler
-from keras.layers.wrappers import Bidirectional
 import matplotlib.pyplot as plt
 from keras.callbacks import TensorBoard, EarlyStopping, ReduceLROnPlateau
 import keras.backend as K
+import time
+import winsound
 
 def plotNP(toPlot, cols):
     for col in cols:
@@ -39,21 +39,19 @@ def to_np_array(multipoint):
 path = r"C:\Users\mljmo\OneDrive\GIMA\Thesis\Data"
 os.chdir(path)
 
+num_samples = 10000
+epochs = 100000
 batch_size = 128
-epochs = 1000
-latent_dim = 256
-num_samples = 20
-depth = 6
 ##################################### Preprocessing
 gdf = pd.read_pickle("Obfuscations.pickle")
+TempModel = gdf.sample(num_samples, random_state=1)
+predictor = TempModel['np_rp']
+response = TempModel['np_track']
+predictor = pad_sequences(predictor.values, 849, padding='post')
+response = pad_sequences(response.values, 849, padding='post')
 
-predictor = gdf['np_rp'].iloc[:num_samples]
-response = gdf['np_track'].iloc[:num_samples]
-predictor = pad_sequences(predictor.values, 200)
-response = pad_sequences(response.values, 200)
-
-input_data = np.zeros( (num_samples, 200, 2), dtype='float32')
-target_data = np.zeros( (num_samples, 200, 2), dtype='float32')
+input_data = np.zeros( (num_samples, 849, 2), dtype='float32')
+target_data = np.zeros( (num_samples, 849, 2), dtype='float32')
 Translation_table = np.zeros((num_samples, 2))
 
 for i, (predictor_val, response_val) in enumerate(zip(predictor, response)):
@@ -61,7 +59,10 @@ for i, (predictor_val, response_val) in enumerate(zip(predictor, response)):
     xmean = np.mean(predictor_val[nonzero,0])
     ymean = np.mean(predictor_val[nonzero,1])
     
-    Translation_table[i] = xmean, ymean
+#    xdif = np.max(predictor_val[nonzero,0]) - np.min(predictor_val[nonzero,0])
+#    ydif = np.max(predictor_val[nonzero,1]) - np.min(predictor_val[nonzero,1])
+#    Translation_table[i,0,:] = xmean, ymean
+#    Translation_table[i,1,:] = xdif, ydif
     for t, point in enumerate(predictor_val):
         if point[0] == 0:
             continue            
@@ -71,48 +72,47 @@ for i, (predictor_val, response_val) in enumerate(zip(predictor, response)):
         target_data[i, t, 0] = point[0] - xmean
         target_data[i, t, 1] = point[1] - ymean
             
-input_shape = predictor.shape[1:]
-#pred = np.random.random([500,5,5])
-#res = pred + 2 + np.random.random(1)
-#input_shape= pred.shape[1:]
+input_shape = input_data.shape[1:]
+try:
+    with open("MyLog.txt", 'w') as myFile:
+        for depth in range(6):
+            for latent_dim in [2, 4, 8, 16, 32, 64, 128, 256, 512]:
+                model = Sequential()
+                model.add(Masking(mask_value=0., input_shape=input_shape))
+                for i in range(depth):
+                    model.add(GRU(latent_dim, return_sequences=True))
+                model.add(Dense(2))
+                
+                model.compile(optimizer=rmsprop(lr=0.05), loss="mse") # MSE over actual - rp is 72070.6
+                
+                name = str(depth)+"deep"+str(latent_dim)+"widemodel"
+                myFile.write(name)
+                ts = time.time()
+                
+                history = model.fit(input_data, target_data, epochs=epochs, batch_size=batch_size, validation_split=0.1, callbacks=[EarlyStopping('loss',patience=50), TensorBoard('NN/'+name), ReduceLROnPlateau(monitor='loss', factor=0.5, patience=20, mode='min', min_lr=0.00001, verbose=1)])
+                
+                myFile.write("Took " + str(time.time() - ts) + " seconds to train")
+                myFile.write("Training loss:\n")
+                myFile.write(str(history.history["loss"]))
+                myFile.write("Test loss:\n")
+                myFile.write(str(history.history["val_loss"]))
+                
+                model_json = model.to_json()
+                with open(name+".json", "w") as json_file:
+                    json_file.write(model_json)
+                # serialize weights to HDF5
+                    
+                model.save_weights(name+".h5")
+                print("Saved model to disk")
+except Exception as e:
+    print(e)
+    frequency = 250# Set Frequency To 2500 Hertz
+    duration = 1000# Set Duration To 1000 ms == 1 second
+    while True:
+        winsound.Beep(frequency, duration)
+        time.sleep(1)
+            
 
-
-
-model = Sequential()
-model.add(GRU(units=latent_dim, input_shape=input_shape, return_sequences=True))
-for i in range(depth):
-    model.add(GRU(latent_dim, return_sequences=True))
-#model.add(GRU(units=200, return_sequences=True))
-#model.add(GRU(units=200, return_sequences=True))
-#model.add(LSTM(units=5, input_shape=input_shape, return_sequences=True))
-#model.add(Dense(5, input_shape=input_shape, activation='relu'))
-#model.add(GRU(32, input_shape=input_shape, return_sequences=True))
-#model.add(Bidirectional(LSTM(12, return_sequences=True), input_shape=input_shape))
-#model.add(GRU(16, return_sequences=True))
-model.add(Dense(2))
-#model.add(Conv1D(5, 5))
-#model.add(ZeroPadding1D(padding=2))
-#Seq2Seq(output_dim=output_dim, hidden_dim=hidden_dim, output_length=output_length, input_shape=(input_length, input_dim), peek=True, depth=2, teacher_force=True)
-
-
-model_json = model.to_json()
-with open("GRUDeepModel.json", "w") as json_file:
-    json_file.write(model_json)
-# serialize weights to HDF5
-    
-model.save_weights("GRUDeepmodel.h5")
-print("Saved model to disk")
-#model.add(Dense(2))
-model.compile(optimizer=rmsprop(lr=0.05), loss=my_mean_squared_error) # MSE over actual - rp is 72070.6
-model.summary()
-model.fit(predictor, response, epochs=epochs, shuffle=True, validation_split=0, callbacks=[EarlyStopping('loss',patience=10), TensorBoard('DeepGRU'), ReduceLROnPlateau(monitor='loss', factor=0.5, patience=8, mode='min', min_lr=0.00001, verbose=1)])
-#
-frequency = 250# Set Frequency To 2500 Hertz
-duration = 1000
-while True:
-  # Set Duration To 1000 ms == 1 second
-    winsound.Beep(frequency, duration)
-    time.sleep(1)
 #testPredictor = pad_sequences(testModel['np_gm'],849)
 #actualResult = pad_sequences(testModel['np_track'],849)
 #testResult = model.predict(testPredictor)
