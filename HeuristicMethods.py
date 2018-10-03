@@ -8,14 +8,14 @@ Created on Fri Aug  3 14:15:53 2018
 import os
 import numpy as np
 import pandas as pd
-#import geopandas as gpd
+import geopandas as gpd
 #from shapely import geometry
 import scipy
 from scipy import spatial
 from scipy import signal
 ### scipy.stats.gaussian_kde
 
-path = r"C:\Users\mljmo\OneDrive\GIMA\Thesis\Data"
+path = r"C:\Users\Maarten\OneDrive\GIMA\Thesis\Data"
 os.chdir(path)
     
 #####################################
@@ -32,9 +32,9 @@ def Smoothing(track, window=3):
         return track
 
 def deGridMask(track):
-    track = np.array(track)
+    track = np.array(track) # Ensure input format
     
-    def ReconstructGrid(track):
+    def ReconstructGrid(track): # Reconstructs original grid assuming regular x and y intervals
         yUnique = np.unique(track[:,1])
         yDist = (yUnique[1:-1] - yUnique[:-2]).min()
         xUnique = np.unique(track[:,0])
@@ -100,13 +100,19 @@ for i, predictor_val in enumerate(predictor):
     track = []
     for t, point in enumerate(predictor_val):
         track.append([point[0] - xmean, point[1] - ymean])
-        predictor_data.append(track)
-
+    predictor_data.append(track)
+    
 response_data = [value.tolist() for value in response.values.tolist()]
+
 SmoothResults = [Smoothing(track) for track in predictor_data] # 80 tracks too short
+
 recall = [Recall(response_data[i], SmoothResults[i]+Translation_table[i]) for i in range(len(SmoothResults))]
 precision = [Precision(response_data[i], SmoothResults[i]+Translation_table[i]) for i in range(len(SmoothResults))]
+print("avg recall:", np.mean(recall), "avg precision", np.mean(precision))
 
+recall2 = [Recall(response_data[i], predictor_data[i] + Translation_table[i]) for i in range(len(response_data))]
+precision2 = [Precision(response_data[i], predictor_data[i] + Translation_table[i]) for i in range(len(response_data))]
+print("avg recall:", np.mean(recall2), "avg precision", np.mean(precision2))
 
 DeGridMaskResults = [deGridMask(track) for track in predictor_data]
 

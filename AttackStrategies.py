@@ -15,8 +15,9 @@ import tensorflow as tf
 from keras.preprocessing.sequence import pad_sequences
 from keras.layers import GRU, Input, Dense, TimeDistributed, Embedding, Bidirectional, RepeatVector, Flatten
 from keras.models import Model, Sequential
-from keras.layers import Activation, LSTM, LocallyConnected1D, Conv1D, ZeroPadding1D, Masking
+from keras.layers import Activation, LSTM, LocallyConnected1D, Conv1D, ZeroPadding1D, Masking, Conv1D
 from keras.optimizers import Adam, SGD, rmsprop
+from keras.activations import relu
 import matplotlib.pyplot as plt
 from keras.callbacks import TensorBoard, EarlyStopping, ReduceLROnPlateau
 import keras.backend as K
@@ -39,8 +40,8 @@ def to_np_array(multipoint):
 path = r"C:\Users\mljmo\OneDrive\GIMA\Thesis\Data"
 os.chdir(path)
 
-num_samples = 10000
-epochs = 100000
+num_samples = 1000
+epochs = 1000
 batch_size = 128
 ##################################### Preprocessing
 gdf = pd.read_pickle("Obfuscations.pickle")
@@ -69,49 +70,31 @@ for i, (predictor_val, response_val) in enumerate(zip(predictor, response)):
         input_data[i, t, 0] = point[0] - xmean
         input_data[i, t, 1] = point[1] - ymean
     for t, point in enumerate(response_val):
+        if point[0] == 0:
+            continue 
         target_data[i, t, 0] = point[0] - xmean
         target_data[i, t, 1] = point[1] - ymean
-            
-input_shape = input_data.shape[1:]
-try:
-    with open("MyLog.txt", 'w') as myFile:
-        for depth in range(6):
-            for latent_dim in [2, 4, 8, 16, 32, 64, 128, 256, 512]:
-                model = Sequential()
-                model.add(Masking(mask_value=0., input_shape=input_shape))
-                for i in range(depth):
-                    model.add(GRU(latent_dim, return_sequences=True))
-                model.add(Dense(2))
-                
-                model.compile(optimizer=rmsprop(lr=0.05), loss="mse") # MSE over actual - rp is 72070.6
-                
-                name = str(depth)+"deep"+str(latent_dim)+"widemodel"
-                myFile.write(name)
-                ts = time.time()
-                
-                history = model.fit(input_data, target_data, epochs=epochs, batch_size=batch_size, validation_split=0.1, callbacks=[EarlyStopping('loss',patience=50), TensorBoard('NN/'+name), ReduceLROnPlateau(monitor='loss', factor=0.5, patience=20, mode='min', min_lr=0.00001, verbose=1)])
-                
-                myFile.write("Took " + str(time.time() - ts) + " seconds to train")
-                myFile.write("Training loss:\n")
-                myFile.write(str(history.history["loss"]))
-                myFile.write("Test loss:\n")
-                myFile.write(str(history.history["val_loss"]))
-                
-                model_json = model.to_json()
-                with open(name+".json", "w") as json_file:
-                    json_file.write(model_json)
-                # serialize weights to HDF5
-                    
-                model.save_weights(name+".h5")
-                print("Saved model to disk")
-except Exception as e:
-    print(e)
-    frequency = 250# Set Frequency To 2500 Hertz
-    duration = 1000# Set Duration To 1000 ms == 1 second
-    while True:
-        winsound.Beep(frequency, duration)
-        time.sleep(1)
-            
+        
+        
+# Get reference loss:
+from sklearn.metrics import mean_squared_error
+print(mean_squared_error(target_data.reshape(-1,2),input_data.reshape(-1,2)))
+# Start models
+options = [[depth, dim] for dim in [2, 8, 32, 64, 128, 256] for depth in range(1,6)]
+Dims = [2, 8, 32, 64, 128, 256]
+depths = range(1,6)
+filters = range(1,10)
+options = zip(Dims, depths, filters)
+for depth, latent_dim, filterSize in options:
+    model = Sequential()
+    for i in range(depth):
+        model.add(Conv1D(latent_dim, 3,padding="same", input_shape=input_shape))
+    model.add(Dense(2))
+    
+    model.compile(optimizer=Adam(lr=0.01), loss="mse") # MSE over actual - rp is 72070.6
+    model.fit(input_data, target_data, epochs=epochs, batch_size=batch_size, validation_split=0.1,\
+              callbacks=[ReduceLROnPlateau(monitor='loss', factor=0.5, patience=20, mode='min', min_lr=0.00001, verbose=1)])
+
 
 #testPredictor = pad_sequences(testModel['np_gm'],849)
 #actualResult = pad_sequences(testModel['np_track'],849)
