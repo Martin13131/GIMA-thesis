@@ -12,26 +12,27 @@ import os
 import numpy as np
 import keras
 import tensorflow as tf
-from keras.preprocessing.sequence import pad_sequences
-from keras.layers import GRU, Input, Dense, TimeDistributed, Embedding, Bidirectional, RepeatVector, Flatten
-from keras.models import Model, Sequential
-from keras.layers import Activation, LSTM, LocallyConnected1D, Conv1D, ZeroPadding1D, Masking, Conv1D
-from keras.optimizers import Adam, SGD, rmsprop
-from keras.activations import relu
+import tensorflow.keras as keras
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+from tensorflow.keras.layers import GRU, Input, Dense, TimeDistributed, Embedding, Bidirectional, RepeatVector, Flatten
+from tensorflow.keras.models import Model, Sequential
+from tensorflow.keras.layers import Activation, LSTM, LocallyConnected1D, Conv1D, ZeroPadding1D, Masking, Conv1D
+from tensorflow.keras.optimizers import Adam, SGD, rmsprop
+from tensorflow.keras.activations import relu
 import matplotlib.pyplot as plt
-from keras.callbacks import TensorBoard, EarlyStopping, ReduceLROnPlateau
-import keras.backend as K
+from tensorflow.keras.callbacks import TensorBoard, EarlyStopping, ReduceLROnPlateau
+import tensorflow.keras.backend as K
+
 import time
 import winsound
-
+import psutil
 def plotNP(toPlot, cols):
     for col in cols:
         for x in toPlot[col].values:
             plt.scatter(x[:,0],x[:,1]) 
     
-def my_mean_squared_error(y_true, y_pred):
-    mask = K.not_equal(y_true, 0)
-    return K.mean(K.square(tf.boolean_mask(y_pred,mask) - tf.boolean_mask(y_true,mask)), axis=-1)
+def my_root_mean_squared_error(y_true, y_pred):
+    return K.sqrt(K.mean(K.square(y_pred - y_true)))
 
 def to_np_array(multipoint):
     return np.array([point.coords for point in multipoint.geoms]).reshape(-1,2)
@@ -40,19 +41,19 @@ def to_np_array(multipoint):
 path = r"C:\Users\mljmo\OneDrive\GIMA\Thesis\Data"
 os.chdir(path)
 
-num_samples = 1000
+num_samples = 10000
 epochs = 1000
 batch_size = 128
 ##################################### Preprocessing
 gdf = pd.read_pickle("Obfuscations.pickle")
 TempModel = gdf.sample(num_samples, random_state=1)
-predictor = TempModel['np_rp']
+predictor = TempModel['np_cr']
 response = TempModel['np_track']
-predictor = pad_sequences(predictor.values, 849, padding='post')
-response = pad_sequences(response.values, 849, padding='post')
+predictor = pad_sequences(predictor.values, 1763, padding='post')
+response = pad_sequences(response.values, 1763, padding='post')
 
-input_data = np.zeros( (num_samples, 849, 2), dtype='float32')
-target_data = np.zeros( (num_samples, 849, 2), dtype='float32')
+input_data = np.zeros( (num_samples, 1763, 2), dtype='float32')
+target_data = np.zeros( (num_samples, 1763, 2), dtype='float32')
 Translation_table = np.zeros((num_samples, 2))
 
 for i, (predictor_val, response_val) in enumerate(zip(predictor, response)):
@@ -75,27 +76,53 @@ for i, (predictor_val, response_val) in enumerate(zip(predictor, response)):
         target_data[i, t, 0] = point[0] - xmean
         target_data[i, t, 1] = point[1] - ymean
         
-        
+input_shape = input_data.shape[1:]       
 # Get reference loss:
 from sklearn.metrics import mean_squared_error
 print(mean_squared_error(target_data.reshape(-1,2),input_data.reshape(-1,2)))
 # Start models
-options = [[depth, dim] for dim in [2, 8, 32, 64, 128, 256] for depth in range(1,6)]
-Dims = [2, 8, 32, 64, 128, 256]
-depths = range(1,6)
-filters = range(1,10)
-options = zip(Dims, depths, filters)
-for depth, latent_dim, filterSize in options:
+batch_size = 32
+Dims = 64
+depths = 5
+filters = 5
+#options = zip(Dims, depths, filters)
+Results = []
+latent_dim, depth, filterSize = Dims, depths, filters
+print(depth, latent_dim, filterSize)
+def identity(x): return x
+with tf.device('/gpu:1'):
     model = Sequential()
+    model.add(keras.layers.Masking( input_shape=input_shape))
+    model.add(keras.layers.Lambda(identity))
+    model.add(Conv1D(latent_dim, filterSize, padding="same", ))
     for i in range(depth):
-        model.add(Conv1D(latent_dim, 3,padding="same", input_shape=input_shape))
+        model.add(Conv1D(latent_dim, filterSize, padding="same"))
+        model.add(Dense(latent_dim, activation="elu"))
     model.add(Dense(2))
     
-    model.compile(optimizer=Adam(lr=0.01), loss="mse") # MSE over actual - rp is 72070.6
-    model.fit(input_data, target_data, epochs=epochs, batch_size=batch_size, validation_split=0.1,\
-              callbacks=[ReduceLROnPlateau(monitor='loss', factor=0.5, patience=20, mode='min', min_lr=0.00001, verbose=1)])
-
-
+    model.compile(optimizer=Adam(lr=0.01), loss=my_root_mean_squared_error) # MSE over actual - rp is 72070.6
+    
+    x=model.fit(input_data, target_data, epochs=epochs, batch_size=batch_size, validation_split=0.1,\
+              callbacks=[ReduceLROnPlateau(monitor='loss', factor=0.9, patience=3, mode='min', min_lr=0.00001, verbose=1),\
+                         EarlyStopping(patience=50)])
+    model.save(r"FinalModels/CR_Conv_64_5_5_2.hdf5")
+    
+with tf.device('/gpu:1'):
+    model = Sequential()
+    model.add(keras.layers.Masking( input_shape=input_shape))
+    model.add(keras.layers.Lambda(identity))
+    model.add(GRU(latent_dim, return_sequences=True))
+    for i in range(depth):
+        model.add(GRU(latent_dim, return_sequences=True))
+        model.add(Dense(latent_dim, activation="elu"))
+    model.add(Dense(2))
+    
+    model.compile(optimizer=Adam(lr=0.01), loss=my_root_mean_squared_error) # MSE over actual - rp is 72070.6
+    
+    x=model.fit(input_data, target_data, epochs=epochs, batch_size=batch_size, validation_split=0.1,\
+              callbacks=[ReduceLROnPlateau(monitor='loss', factor=0.9, patience=3, mode='min', min_lr=0.00001, verbose=1),\
+                         EarlyStopping(patience=50)])
+    model.save(r"FinalModels/CR_GRU_64_5_5_2.hdf5")
 #testPredictor = pad_sequences(testModel['np_gm'],849)
 #actualResult = pad_sequences(testModel['np_track'],849)
 #testResult = model.predict(testPredictor)

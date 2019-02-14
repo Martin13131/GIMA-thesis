@@ -27,8 +27,8 @@ def boundingBox(track):
 
 def bufferAttack(track):
     track = gpd.GeoSeries([geometry.Point(point) for point in track])
-    distance=np.mean([track.loc[i].distance(track.loc[i+1]) for i in range(len(track)-1)])
-    return track.buffer(distance)
+    distance = np.mean([track.loc[i].distance(track.loc[i+1]) for i in range(len(track)-1)])
+    return track.buffer(distance).unary_union
      
 def Smoothing(track, window=3):
     try:
@@ -72,7 +72,7 @@ def deGridMask(track):
                 p3, p4 = np.array([x1, y1-yDist]), np.array([x2, y2-yDist])
             elif y1 == y2 and y1 > ygrid[-2]:
                 p3, p4 = np.array([x1, y1+yDist]), np.array([x2, y2+yDist])
-            return [p1, p2, p3, p4]
+            return [p1, p2, p4,p3]
         except Exception as e:
             print(area, e)
             
@@ -90,11 +90,12 @@ def deGridMask(track):
         vor = spatial.Voronoi(grid)
         areas = [TraverseVoronoi(point, grid, vor) for point in track]
         return areas
-
-    xgrid, ygrid = ReconstructGrid(track)
-    areas = findPossibilitySpace(track, xgrid, ygrid)
-    return areas
-
+    try:
+        xgrid, ygrid = ReconstructGrid(track)
+        areas = gpd.GeoSeries([geometry.Polygon(point) for point in findPossibilitySpace(track, xgrid, ygrid)]).unary_union
+        return areas
+    except ValueError:
+        return gpd.GeoSeries([geometry.Point(point) for point in track]).buffer(10)
 #%% Metrics:
     
 #def precision(y_true, y_pred):
@@ -117,7 +118,7 @@ def calculateMetrics(y_true, y_pred, convPolygons=False, Buffer=10):
 #    print("Calculated difference", Difference)
     precision = Intersection / y_pred.area.sum()
     recall = Intersection / y_true.area.sum()
-    IoU = Intersection / y_pred.area.sum()+y_true.area.sum() - Intersection
+    IoU = Intersection / (y_pred.area.sum()+y_true.area.sum() - Intersection)
     return [precision, recall, IoU]
 
 ##################################### Preprocessing
@@ -127,71 +128,77 @@ randomPerturbed = gdf['np_rp']
 crowded = gdf['np_cr']
 response = gdf['np_track']
 del gdf
-#Translation_table = np.zeros((len(gdf),2))
-#predictor_data = []
-#errorTracks = []
-#for i, predictor_val in enumerate(predictor):
-#    xmean = np.mean(predictor_val[:,0])
-#    ymean = np.mean(predictor_val[:,1])    
-#    Translation_table[i] = xmean, ymean
-#    track = []
-#    for t, point in enumerate(predictor_val):
-#        track.append([point[0] - xmean, point[1] - ymean])
-#    predictor_data.append(track)
+
     
 response_data = [value.tolist() for value in response.values.tolist()]
 ValidationPolygons= gpd.GeoSeries([geometry.LineString(track) for track in response_data]).buffer(10)
 del response_data
+
+#%% Baseline
+gmBase = gpd.GeoSeries([geometry.LineString(track) for track in gridMasked]).buffer(10)
+rpBase = gpd.GeoSeries([geometry.LineString(track) for track in randomPerturbed]).buffer(10)
+crBase = gpd.GeoSeries([geometry.LineString(track) for track in crowded]).buffer(10)
+
+gmBaseMetrics = calculateMetrics(ValidationPolygons, gmBase)
+rpBaseMetrics = calculateMetrics(ValidationPolygons, rpBase)
+crBaseMetrics = calculateMetrics(ValidationPolygons, crBase)
 #%% Calculate bounding boxes)
 gmboundingBoxes = gpd.GeoSeries([boundingBox(track) for track in gridMasked])
-rpboundingBoxes = gpd.GeoSeries([boundingBox(track) for track in randomPerturbed])
-crboundingBoxes = gpd.GeoSeries([boundingBox(track) for track in crowded])
-
+gmboundingBoxes.to_file("Attacked/gmbb.shp")
 gmbbMetrics = calculateMetrics(ValidationPolygons, gmboundingBoxes)
+del gmboundingBoxes
+
+rpboundingBoxes = gpd.GeoSeries([boundingBox(track) for track in randomPerturbed])
+rpboundingBoxes.to_file("Attacked/rpbb.shp")
 rpbbMetrics = calculateMetrics(ValidationPolygons, rpboundingBoxes)
+del rpboundingBoxes
+
+crboundingBoxes = gpd.GeoSeries([boundingBox(track) for track in crowded])
+crboundingBoxes.to_file("Attacked/crbb.shp")
 crbbMetrics = calculateMetrics(ValidationPolygons, crboundingBoxes)
+del crboundingBoxes
+
+
+
 
 #%% Apply Buffer:
 gmBuffer = gpd.GeoSeries([bufferAttack(track) for track in gridMasked])
-print("Buffered GM")
-rpBuffer = gpd.GeoSeries([bufferAttack(track) for track in randomPerturbed])
-print("Buffered RP")
-crBuffer = gpd.GeoSeries([bufferAttack(track) for track in crowded])
-print("Buffered Cr")
-
+#gmBuffer.to_file("Attacked/gmbuf.shp")
 gmBufferMetrics = calculateMetrics(ValidationPolygons, gmBuffer)
+del gmBuffer
+
+rpBuffer = gpd.GeoSeries([bufferAttack(track) for track in randomPerturbed])
+#rpBuffer.to_file("Attacked/rpbuf.shp")
 rpBufferMetrics = calculateMetrics(ValidationPolygons, rpBuffer)
+del rpBuffer
+
+crBuffer = gpd.GeoSeries([bufferAttack(track) for track in crowded])
+#crBuffer.to_file("Attacked/crbuf.shp")
 crBufferMetrics = calculateMetrics(ValidationPolygons, crBuffer)
+del crBuffer
 #%% Smoothing
 gmSmoothing = gpd.GeoSeries([Smoothing(track) for track in gridMasked]) # 80 tracks too short
-rpSmoothing = gpd.GeoSeries([Smoothing(track) for track in randomPerturbed])
-crSmoothing = gpd.GeoSeries([Smoothing(track) for track in crowded])
-
+#gmSmoothing.to_file("Attacked/gmsmooth.shp")
 gmSmoothMetrics = calculateMetrics(ValidationPolygons, gmSmoothing, convPolygons=True)
+del gmSmoothing
+
+rpSmoothing = gpd.GeoSeries([Smoothing(track) for track in randomPerturbed])
+#rpSmoothing.to_file("Attacked/rpsmooth.shp")
 rpSmoothMetrics = calculateMetrics(ValidationPolygons, rpSmoothing, convPolygons=True)
+del rpSmoothing
+
+
+crSmoothing = gpd.GeoSeries([Smoothing(track) for track in crowded])
+#crSmoothing.to_file("Attacked/crsmooth.shp")
 crSmoothMetrics = calculateMetrics(ValidationPolygons, crSmoothing, convPolygons=True)
+del crSmoothing
 
-#recall = [Recall(response_data[i], SmoothResults[i]+Translation_table[i]) for i in range(len(SmoothResults))]
-#precision = [Precision(response_data[i], SmoothResults[i]+Translation_table[i]) for i in range(len(SmoothResults))]
-#print("avg recall:", np.mean(recall), "avg precision", np.mean(precision))
+#%% Degridmasking
+#DeGridMaskResults = []
+#for track in gridMasked:
+#    DeGridMaskResults.append(deGridMask(track))
+#DeGridMaskResults = [deGridMask(track) for track in gridMasked]
 
-#recall2 = [Recall(response_data[i], predictor_data[i] + Translation_table[i]) for i in range(len(response_data))]
-#precision2 = [Precision(response_data[i], predictor_data[i] + Translation_table[i]) for i in range(len(response_data))]
-#print("avg recall:", np.mean(recall2), "avg precision", np.mean(precision2))
 
-DeGridMaskResults = [deGridMask(track) for track in gridMasked]
-
-with open("FinalModels/HeuristicResults.txt", 'w') as File:
-    File.write("Bounding box results:\n")
-    File.write(gmbbMetrics)
-    File.write(rpbbMetrics)
-    File.write(crbbMetrics)
     
-############################### Testing
-#x = predictor_data[0]
-#x = Smoothing(x) + Translation_table[0]
-#plt.scatter(x[:,0], x[:,1], c='r')
-#y = np.array(response_data[0])
-#plt.scatter(y[:,0], y[:,1], c='b')
-#z = np.array(predictor_data[0]) + Translation_table[0]
-#plt.scatter(z[:,0], z[:,1], c='y') 
+
